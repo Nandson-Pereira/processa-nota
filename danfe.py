@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from datetime import datetime
 from io import BytesIO
+import re
 
 NFE_NS = "{http://www.portalfiscal.inf.br/nfe}"
 
@@ -316,15 +317,7 @@ def _render_conteudo_danfe(pdf, dados: dict) -> None:
         pdf.texto(f"{forma}: R$ {valor}")
     pdf.ln(0.5)
     pdf.linha()
-
-    # Informações complementares
-
-    if dados["infcpl"]:
-        pdf.set_font("Helvetica", "", 6)
-        pdf.multi_cell(W - 6, 3, dados["infcpl"][:120], border=0, align="L")
-        pdf.set_font("Helvetica", "", 8)
-        pdf.ln(0.5)
-    pdf.linha()
+  
 
     # Chave de acesso
 
@@ -373,7 +366,46 @@ def _render_conteudo_danfe(pdf, dados: dict) -> None:
             pdf.multi_cell(W - 6, 3, dados["qr_code"], border=0, align="C")
             pdf.set_font("Helvetica", "", 8)
 
-    pdf.linha()
+
+     # Linha superior abaixo do QRCODE
+    y_top = pdf.get_y()
+    pdf.set_draw_color(0, 0, 0)
+    pdf.set_line_width(0.4)
+    pdf.set_dash_pattern(dash=2, gap=2)
+    pdf.line(2, y_top, W - 2, y_top)
+    pdf.set_dash_pattern()
+    pdf.set_line_width(0.2)
+
+    # Informação dos Tributos Totais Incidentes (Lei Federal 12.741 /2012): + valor ou R$ 0,00
+    pdf.set_y(y_top + 1)
+    pdf.set_font("Helvetica", "B", 6)
+    titulo_trib = "Tributos Totais Incidentes (Lei Federal 12.741 /2012):"    
+
+    valor_trib = next((v for v in re.findall(r'R\$\s?\d+,\d{2}', dados["infcpl"]) if "0,00" not in v), "R$0,00")    
+    
+    pdf.multi_cell(W - 6, 4, titulo_trib + " " + valor_trib, border=0, align="C")
+    y_after_text = pdf.get_y()
+    pdf.set_y(y_after_text + 1)
+
+    # Linha inferior abaixo do QRCODE
+    y_bottom = pdf.get_y()
+    pdf.set_draw_color(0, 0, 0)
+    pdf.set_line_width(0.4)
+    pdf.set_dash_pattern(dash=2, gap=2)
+    pdf.line(2, y_bottom, W - 2, y_bottom)
+    pdf.set_dash_pattern()
+    pdf.set_line_width(0.2)
+    pdf.set_y(y_bottom + 1)
+            
+
+      # Informações complementares
+
+    if dados["infcpl"]:
+        pdf.set_font("Helvetica", "", 6)
+        pdf.multi_cell(W - 6, 2, dados["infcpl"][:127], border=0, align="L")
+        pdf.set_font("Helvetica", "", 8)
+        pdf.ln(0.5)
+    pdf.linha()   
 
     # Linha inferior
 def gerar_pdf_danfe(dados: dict) -> bytes:
