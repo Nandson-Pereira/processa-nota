@@ -13,8 +13,9 @@ import uuid
 import zipfile
 from pathlib import Path
 from urllib.parse import urlparse
-from io import BytesIO
+from io import BytesIO, StringIO
 import re
+import csv
 import traceback
 import sys
 
@@ -233,21 +234,193 @@ def ler_xmls_autorizadas(pasta: Path) -> list[tuple]:
     return valores_autorizadas
 
 
-def gerar_relatorio_imposto_txt() -> str:
-    """Gera relatório de impostos em .txt conforme layout do script original (valores_nfce.txt)."""
+def _dados_relatorio_imposto() -> tuple[list[str], list[tuple]] | None:
+    """Retorna (lista_nomes_colunas, lista de tuplas de dados) ou None se não houver XMLs autorizados."""
     pasta = BASE_DIR / "AUTORIZADO"
     if not pasta.exists():
-        return ""
-
+        return None
     autorizadas = ler_xmls_autorizadas(pasta)
     if not autorizadas:
-        return ""
+        return None
+    colunas = [c.strip() for c in HEADER_AUTORIZADAS.split(",")]
+    return (colunas, autorizadas)
 
+
+def gerar_relatorio_imposto_txt() -> str:
+    """Gera relatório de impostos em .txt conforme layout do script original (valores_nfce.txt)."""
+    dados = _dados_relatorio_imposto()
+    if not dados:
+        return ""
+    _, autorizadas = dados
     linhas = [HEADER_AUTORIZADAS]
     for linha_dados in autorizadas:
         linhas.append(FORMATO_AUTORIZADAS.format(*linha_dados))
-
     return "\n".join(linhas)
+
+
+def gerar_relatorio_imposto_csv() -> bytes:
+    """Gera relatório de impostos em .csv (UTF-8, separador ;)."""
+    dados = _dados_relatorio_imposto()
+    if not dados:
+        return b""
+    colunas, autorizadas = dados
+    buf = StringIO()
+    writer = csv.writer(buf, delimiter=";", lineterminator="\n")
+    writer.writerow(colunas)
+    for row in autorizadas:
+        writer.writerow(row)
+    return ("\ufeff" + buf.getvalue()).encode("utf-8")
+
+
+def _xlsx_escape(s: str) -> str:
+    """Escapa texto para uso dentro de XML."""
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _gerar_xlsx_minimo(colunas: list[str], linhas: list[tuple]) -> bytes:
+    """Gera um .xlsx mínimo (ZIP + XML) sem depender de openpyxl."""
+
+    # Coletar todas as strings únicas para sharedStrings
+    string_list = []
+    string_index = {}
+
+    def ensure_string(val):
+        s = str(val).strip()
+        if s not in string_index:
+            string_index[s] = len(string_list)
+            string_list.append(s)
+        return string_index[s]
+
+    for c in colunas:
+        ensure_string(c)
+    for row in linhas:
+        for cell in row:
+            ensure_string(cell)
+
+    # sharedStrings.xml
+    sst = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>']
+    sst.append(
+        f'<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="{len(string_list)}" uniqueCount="{len(string_list)}">'
+    )
+    for s in string_list:
+        sst.append(f"<si><t>{_xlsx_escape(s)}</t></si>")
+    sst.append("</sst>")
+    shared_str_xml = "\n".join(sst).encode("utf-8")
+
+    # sheet1.xml - células como shared string (t="s") com índice
+    def cell_ref(row_1based, col_0based):
+        col = ""
+        c = col_0based
+        while c >= 0:
+            col = chr(65 + (c % 26)) + col
+            c = c // 26 - 1
+        return f"{col}{row_1based}"
+
+    rows_xml = []
+    for r_idx, row_data in enumerate([colunas] + list(linhas), 1):
+        cells = []
+        for c_idx, val in enumerate(row_data):
+            ref = cell_ref(r_idx, c_idx)
+            idx = ensure_string(val)
+            cells.append(f'<c r="{ref}" t="s"><v>{idx}</v></c>')
+        rows_xml.append(f'<row r="{r_idx}">{"".join(cells)}</row>')
+    sheet_data = "".join(rows_xml)
+    sheet_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData>
+{sheet_data}
+</sheetData>
+</worksheet>""".encode(
+        "utf-8"
+    )
+
+    content_types = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+</Types>"""
+
+    rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"""
+
+    workbook = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="Relatorio Impostos" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"""
+
+    workbook_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
+</Relationships>"""
+
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types.encode("utf-8"))
+        zf.writestr("_rels/.rels", rels.encode("utf-8"))
+        zf.writestr("xl/workbook.xml", workbook.encode("utf-8"))
+        zf.writestr("xl/_rels/workbook.xml.rels", workbook_rels.encode("utf-8"))
+        zf.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+        zf.writestr("xl/sharedStrings.xml", shared_str_xml)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def gerar_relatorio_imposto_xlsx() -> bytes:
+    """Gera relatório de impostos em .xlsx. Usa openpyxl se disponível, senão gera XLSX mínimo em Python puro."""
+    dados = _dados_relatorio_imposto()
+    if not dados:
+        return b""
+    colunas, autorizadas = dados
+    try:
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Relatorio Impostos"
+        ws.append(colunas)
+        for row in autorizadas:
+            ws.append(list(row))
+        buf = BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf.getvalue()
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"[Relatório] Erro openpyxl, usando gerador interno: {e}", file=sys.stderr)
+    return _gerar_xlsx_minimo(colunas, autorizadas)
+
+
+def gerar_relatorio_imposto_zip() -> tuple[bytes, str] | None:
+    """Gera relatório em .txt, .csv e .xlsx e retorna um ZIP com os 3 arquivos."""
+    dados = _dados_relatorio_imposto()
+    if not dados:
+        return None
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    nome_base = f"relatorio_impostos_{ts}"
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        txt = gerar_relatorio_imposto_txt()
+        zf.writestr(f"{nome_base}.txt", txt.encode("utf-8"))
+        csv_bytes = gerar_relatorio_imposto_csv()
+        if csv_bytes:
+            zf.writestr(f"{nome_base}.csv", csv_bytes)
+        xlsx_bytes = gerar_relatorio_imposto_xlsx()
+        zf.writestr(f"{nome_base}.xlsx", xlsx_bytes)
+    buf.seek(0)
+    return (buf.getvalue(), f"{nome_base}.zip")
 
 
 def gerar_danfe_zip() -> tuple[bytes, str] | None:
@@ -424,14 +597,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def handle_relatorio_imposto(self):
         try:
-            conteudo = gerar_relatorio_imposto_txt()
-            if not conteudo:
+            resultado = gerar_relatorio_imposto_zip()
+            if not resultado:
                 self.send_json({"ok": False, "erro": "Nenhum XML autorizado encontrado"}, 404)
                 return
-            dados = conteudo.encode("utf-8")
-            filename = f"relatorio_impostos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            dados, filename = resultado
             self.send_response(200)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Type", "application/zip")
             self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.send_header("Content-Length", str(len(dados)))
             self.send_header("Access-Control-Allow-Origin", "*")

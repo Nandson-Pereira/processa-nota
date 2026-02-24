@@ -117,7 +117,7 @@ btnGerarRelatorio.addEventListener("click", async () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = res.headers.get("Content-Disposition")?.match(/filename="(.+)"/)?.[1] || "relatorio_impostos.txt";
+    a.download = res.headers.get("Content-Disposition")?.match(/filename="(.+)"/)?.[1] || "relatorio_impostos.zip";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
