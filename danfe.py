@@ -223,7 +223,7 @@ def _render_conteudo_danfe(pdf, dados: dict) -> None:
         y_emit = pdf.get_y()
     pdf.set_font("Helvetica", "", 8)
 
-    
+    pdf.ln(3) 
 
     # Linha superior
     y_top = pdf.get_y()
@@ -251,7 +251,7 @@ def _render_conteudo_danfe(pdf, dados: dict) -> None:
     pdf.set_line_width(0.2)
     pdf.set_y(y_bottom + 1)
 
-    # Itens (w_espaco = espaço entre descrição e QTD para evitar sobreposição)
+    # Cabeçalho dos itens
     w_id, w_cod, w_desc = 4, 8, 18
     w_espaco = 3
     w_qtd, w_un, w_vun, w_vtot, w_desc_item = 6, 5, 10, 10, 8
@@ -267,6 +267,8 @@ def _render_conteudo_danfe(pdf, dados: dict) -> None:
     pdf.cell(w_vtot, h_cell, "V_TOTAL", border=0, align="R")
     pdf.cell(w_desc_item, h_cell, "DESC.", border=0, align="R")
     pdf.ln(h_cell + 1)
+
+    # Itens Preenchimentos dos itens com suas informações conforme cabeçalho
     pdf.set_font("Helvetica", "", 6)
     for i, it in enumerate(dados["itens"], 1):
         cod = (it.get("cod") or str(i))[:6]
@@ -281,20 +283,70 @@ def _render_conteudo_danfe(pdf, dados: dict) -> None:
         pdf.cell(w_vtot, h_cell, _fmt_valor(it.get("vprod", "")), border=0, align="R")
         pdf.cell(w_desc_item, h_cell, _fmt_valor(it.get("vdesc", "") or "0"), border=0, align="R")
         pdf.ln(h_cell + 1)
-    pdf.set_font("Helvetica", "", 8)
+    pdf.set_font("Helvetica", "", 6)
     pdf.ln(0.5)
     pdf.linha()
     
-    # Total de itens
-    
-    pdf.texto(f"QTD TOTAL DE ITENS: {len(dados['itens'])}")
+    # Total de itens (texto à esquerda, valor à direita na mesma linha)
+    pdf.set_font("Helvetica", "", 6)
+    pdf.cell(W - 6 - 12, 4, "QTD Total de Itens", border=0, align="L")
+    pdf.cell(12, 4, str(len(dados["itens"])), border=0, align="R")
+    pdf.ln(4)
+
+
+    # Valor Total  Total desconto mais Valor a pagar liquido (texto à esquerda, valor à direita na mesma linha)
+    # Valor Total: R$ = vdesc + vnf (texto à esquerda, valor à direita)
+    try:
+        vdesc_num = float(str(dados.get("v_desc", "0")).replace(",", "."))
+    except (ValueError, TypeError):
+        vdesc_num = 0.0
+    try:
+        vnf_num = float(str(dados.get("v_nf", "0")).replace(",", "."))
+    except (ValueError, TypeError):
+        vnf_num = 0.0
+    valor_total = vdesc_num + vnf_num
+    vnf = f"{valor_total:.2f}".replace(".", ",")
+    pdf.set_font("Helvetica", "", 7)
+    pdf.cell(W - 6 - 18, 4, "Valor Total: R$ ", border=0, align="L")
+    pdf.cell(18, 4, vnf, border=0, align="R")
+    pdf.ln(4)
+
+    # Total de Desconto (texto à esquerda, valor à direita na mesma linha)
+
     try:
         vdesc = float(dados["v_desc"].replace(",", "."))
         if vdesc > 0:
-            pdf.texto(f" Total Desconto: R$ {vdesc:.2f}")
+            pdf.set_font("Helvetica", "", 6)
+            pdf.cell(W - 6 - 18, 4, "Total Desconto: R$ ", border=0, align="L")
+            pdf.cell(18, 4, f"{vdesc:.2f}".replace(".", ","), border=0, align="R")
+            pdf.ln(4)   
     except ValueError:
         pass
-    pdf.texto(f"TOTAL: R$ {dados['v_nf']}", bold=True)
+
+    # Valor TOTAL a PAGAR (texto à esquerda, valor à direita)
+    try:
+        vnf = f"{float(str(dados.get('v_nf', '0')).replace(',', '.')):.2f}".replace(".", ",")
+    except (ValueError, TypeError):
+        vnf = str(dados.get("v_nf", "0"))
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(W - 6 - 18, 4, "Valor a Pagar: R$ ", border=0, align="L")
+    pdf.cell(18, 4, vnf, border=0, align="R")
+    pdf.ln(4)
+    pdf.ln(0.5)
+
+     # Forma de pagamento (cabeçalho: FORMA DE PAGAMENTO | VALOR PAGO; linhas: forma | R$ valor)
+    w_esq = W - 6 - 22
+    w_dir = 22
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(w_esq, 4, "FORMA DE PAGAMENTO", border=0, align="L")
+    pdf.cell(w_dir, 4, "VALOR PAGO", border=0, align="R")
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "", 8)
+    for forma, valor in dados["pagamentos"]:
+        v = _fmt_valor(valor)
+        pdf.cell(w_esq, 4, forma or "Outros", border=0, align="L")
+        pdf.cell(w_dir, 4, f"R$ {v}" if v else "R$ 0,00", border=0, align="R")
+        pdf.ln(4)
     pdf.ln(0.5)
     pdf.linha()
 
@@ -308,15 +360,7 @@ def _render_conteudo_danfe(pdf, dados: dict) -> None:
         if dados["dest_nome"]:
             pdf.texto(dados["dest_nome"][:50])
         pdf.ln(1)
-        pdf.linha()
-
-    # Forma de pagamento
-
-    pdf.texto("FORMA DE PAGAMENTO", bold=True)
-    for forma, valor in dados["pagamentos"]:
-        pdf.texto(f"{forma}: R$ {valor}")
-    pdf.ln(0.5)
-    pdf.linha()
+        pdf.linha()    
   
 
     # Chave de acesso
