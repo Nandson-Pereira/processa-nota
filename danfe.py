@@ -67,6 +67,17 @@ def extrair_dados_danfe(xml_path: Path) -> dict | None:
             inf = root.find(f".//{NFE_NS}infNFe")
             if inf is not None and inf.get("Id"):
                 chave = inf.get("Id", "").replace("NFe", "")
+        n_prot = _t(infprot.find(f".//{NFE_NS}nProt"))
+        dh_recbto_raw = _t(infprot.find(f".//{NFE_NS}dhRecbto"))
+        dh_recbto = ""
+        if dh_recbto_raw and "T" in dh_recbto_raw:
+            try:
+                dt = datetime.fromisoformat(dh_recbto_raw.replace("Z", "+00:00")[:19])
+                dh_recbto = dt.strftime("%d/%m/%Y %H:%M:%S")
+            except Exception:
+                dh_recbto = dh_recbto_raw[:19].replace("T", " ") if len(dh_recbto_raw) >= 19 else dh_recbto_raw
+        elif dh_recbto_raw:
+            dh_recbto = dh_recbto_raw
 
         ide = root.find(f".//{NFE_NS}ide")
         emit = root.find(f".//{NFE_NS}emit")
@@ -156,6 +167,8 @@ def extrair_dados_danfe(xml_path: Path) -> dict | None:
             "chave": chave,
             "n_nf": n_nf,
             "serie": serie,
+            "n_prot": n_prot,
+            "dh_recbto": dh_recbto,
             "dhemi": dhemi,
             "cnpj": cnpj,
             "ie": ie,
@@ -349,40 +362,73 @@ def _render_conteudo_danfe(pdf, dados: dict) -> None:
         pdf.ln(4)
     pdf.ln(0.5)
     pdf.linha()
+    
 
-    # Destinatário
+    # Dados do consumidor (título centralizado; abaixo: CPF/CNPJ + nome ou "CLIENTE NAO IDENTIFICADO")
+    pdf.set_font("Helvetica", "B", 7)
+    pdf.multi_cell(W - 6, 4, "CONSUMIDOR", border=0, align="C")
+    pdf.ln(1)
     if dados["dest_nome"] or dados["dest_cpf"] or dados["dest_cnpj"]:
-        pdf.texto("CONSUMIDOR", bold=True)
+        doc = ""
         if dados["dest_cpf"]:
-            pdf.texto(f"CPF: {_fmt_cpf(dados['dest_cpf'])}")
-        if dados["dest_cnpj"]:
-            pdf.texto(f"CNPJ: {_fmt_cnpj(dados['dest_cnpj'])}")
-        if dados["dest_nome"]:
-            pdf.texto(dados["dest_nome"][:50])
-        pdf.ln(1)
-        pdf.linha()    
+            doc = f"CPF: {_fmt_cpf(dados['dest_cpf'])}"
+        elif dados["dest_cnpj"]:
+            doc = f"CNPJ: {_fmt_cnpj(dados['dest_cnpj'])}"
+        nome = (dados.get("dest_nome") or "")[:45]
+        linha_consumidor = f"{doc}  {nome}".strip() if doc or nome else ""
+        if linha_consumidor:
+            pdf.set_font("Helvetica", "", 8)
+            pdf.multi_cell(W - 6, 4, linha_consumidor, border=0, align="C")
+    else:
+        pdf.set_font("Helvetica", "", 8)
+        pdf.multi_cell(W - 6, 4, "CONSUMIDOR NAO IDENTIFICADO", border=0, align="C")
+    pdf.ln(1)
+    pdf.linha()    
   
 
-    # Chave de acesso
-
-    ch = dados["chave"]
-    if len(ch) >= 44:
-        pdf.texto("CHAVE DE ACESSO:", bold=True)
-        pdf.set_font("Helvetica", "", 6)
-        for i in range(0, 44, 44):
-            pdf.texto(ch[i : i + 44])
+    # Consulta pela chave de acesso (centralizado)
+    if dados["url_chave"]:
+        pdf.set_font("Helvetica", "", 8)
+        pdf.multi_cell(W - 6, 4, "Consulta pela Chave de Acesso em:", border=0, align="C")
+        pdf.ln(0.5)
+        pdf.set_font("Helvetica", "", 7)
+        pdf.set_text_color(0, 102, 204)  # azul claro tipo link
+        pdf.multi_cell(W - 6, 3, dados["url_chave"], border=0, align="C")
+        pdf.set_text_color(0, 0, 0)
         pdf.set_font("Helvetica", "", 8)
     pdf.ln(0.5)
-    pdf.texto(f"Serie: {dados['serie']}  Numero: {dados['n_nf']}", bold=True)
-    pdf.texto(f"Data Hora Emissao: {dados['dhemi']}")
 
-    # Consulta pela chave de acesso
 
-    if dados["url_chave"]:
-        pdf.texto("Consulta pela Chave de Acesso em:")
+
+    # Chave de acesso (centralizado): título na linha acima, conteúdo abaixo
+    ch = dados.get("chave") or ""
+    if ch:
+        pdf.set_font("Helvetica", "B", 7)
+        pdf.multi_cell(W - 6, 4, "CHAVE DE ACESSO:", border=0, align="C")
+        pdf.ln(0.5)
         pdf.set_font("Helvetica", "", 6)
-        pdf.multi_cell(W - 6, 3, dados["url_chave"], border=0, align="L")
+        pdf.multi_cell(W - 6, 3, ch, border=0, align="C")
         pdf.set_font("Helvetica", "", 8)
+    pdf.ln(0.5)
+
+    # Série e número da nota fiscal (centralizado)
+    serie_raw = str(dados.get("serie", "") or "").strip()
+    serie_fmt = "".join(c for c in serie_raw if c.isdigit()).zfill(3) or "000"
+    nnf_raw = "".join(c for c in str(dados.get("n_nf", "") or "") if c.isdigit()).zfill(9)
+    nnf_fmt = f"{nnf_raw[:3]}.{nnf_raw[3:6]}.{nnf_raw[6:9]}" if len(nnf_raw) >= 9 else nnf_raw
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.multi_cell(W - 6, 4, f"Serie: {serie_fmt}   Numero: {nnf_fmt}", border=0, align="C")
+    pdf.set_font("Helvetica", "", 8)
+    pdf.ln(1)
+    pdf.multi_cell(W - 6, 4, f"Data Hora Emissao: {dados['dhemi']}", border=0, align="C")
+    pdf.ln(1)
+
+    # Protocolo de autorização e data hora autorização (centralizado)
+    pdf.multi_cell(W - 6, 4, f"Protocolo de Autorizacao: {dados.get('n_prot', '')}", border=0, align="C")
+    pdf.ln(1)
+    pdf.multi_cell(W - 6, 4, f"Data Hora autorizacao: {dados.get('dh_recbto', '')}", border=0, align="C")
+    pdf.ln(1)
+
 
     # QR Code
 
