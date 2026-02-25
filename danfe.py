@@ -91,7 +91,7 @@ def extrair_dados_danfe(xml_path: Path) -> dict | None:
         if "T" in dhemi:
             try:
                 dt = datetime.fromisoformat(dhemi.replace("Z", "+00:00")[:19])
-                dhemi = dt.strftime("%d/%m/%Y %H:%M")
+                dhemi = dt.strftime("%d/%m/%Y %H:%M:%S")
             except Exception:
                 pass
 
@@ -365,15 +365,13 @@ def _render_conteudo_danfe(pdf, dados: dict) -> None:
     
 
     # Dados do consumidor (título centralizado; abaixo: CPF/CNPJ + nome ou "CLIENTE NAO IDENTIFICADO")
-    pdf.set_font("Helvetica", "B", 7)
-    pdf.multi_cell(W - 6, 4, "CONSUMIDOR", border=0, align="C")
-    pdf.ln(1)
+    
     if dados["dest_nome"] or dados["dest_cpf"] or dados["dest_cnpj"]:
         doc = ""
         if dados["dest_cpf"]:
-            doc = f"CPF: {_fmt_cpf(dados['dest_cpf'])}"
+            doc = f"CONSUMIDOR - CPF: {_fmt_cpf(dados['dest_cpf'])}"
         elif dados["dest_cnpj"]:
-            doc = f"CNPJ: {_fmt_cnpj(dados['dest_cnpj'])}"
+            doc = f"CONSUMIDOR - CNPJ: {_fmt_cnpj(dados['dest_cnpj'])}"
         nome = (dados.get("dest_nome") or "")[:45]
         linha_consumidor = f"{doc}  {nome}".strip() if doc or nome else ""
         if linha_consumidor:
