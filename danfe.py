@@ -404,7 +404,7 @@ def _render_conteudo_danfe(pdf, dados: dict) -> None:
         pdf.set_font("Helvetica", "B", 7)
         pdf.multi_cell(W - 6, 4, "CHAVE DE ACESSO:", border=0, align="C")
         pdf.ln(0.5)
-        pdf.set_font("Helvetica", "", 6)
+        pdf.set_font("Helvetica", "", 8)
         pdf.multi_cell(W - 6, 3, ch, border=0, align="C")
         pdf.set_font("Helvetica", "", 8)
     pdf.ln(0.5)
