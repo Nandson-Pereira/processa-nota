@@ -208,9 +208,32 @@ def _render_conteudo_danfe(pdf, dados: dict) -> None:
 
     if logo_path.exists():
         try:
-            pdf.image(str(logo_path), x=x_logo, y=3, w=logo_h, h=logo_h)
+            from PIL import Image
+            img = Image.open(logo_path)
+            if img.mode in ("RGBA", "P"):
+                bg = Image.new("RGB", img.size, (255, 255, 255))
+                if img.mode == "RGBA":
+                    bg.paste(img, mask=img.split()[-1])
+                else:
+                    bg.paste(img)
+                img = bg
+            elif img.mode != "RGB":
+                img = img.convert("RGB")
+            max_px = 96
+            try:
+                resample = Image.Resampling.LANCZOS
+            except AttributeError:
+                resample = getattr(Image, "LANCZOS", 3)
+            img.thumbnail((max_px, max_px), resample)
+            buf_logo = BytesIO()
+            img.save(buf_logo, format="JPEG", quality=82, optimize=True)
+            buf_logo.seek(0)
+            pdf.image(buf_logo, x=x_logo, y=3, w=logo_h, h=logo_h)
         except Exception:
-            pass
+            try:
+                pdf.image(str(logo_path), x=x_logo, y=3, w=logo_h, h=logo_h)
+            except Exception:
+                pass
 
     y_emit = 3
     pdf.set_font("Helvetica", "B", 8)
@@ -433,12 +456,12 @@ def _render_conteudo_danfe(pdf, dados: dict) -> None:
     if dados["qr_code"]:
         try:
             import qrcode
-            qr = qrcode.QRCode(version=1, box_size=4, border=2)
+            qr = qrcode.QRCode(version=1, box_size=3, border=2)
             qr.add_data(dados["qr_code"])
             qr.make(fit=True)
             img = qr.make_image(fill_color="black", back_color="white")
             buf = BytesIO()
-            img.save(buf, format="PNG")
+            img.save(buf, format="PNG", compress_level=9, optimize=True)
             buf.seek(0)
             qr_size = 50
             x = (W - qr_size) / 2
